@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<mule xmlns:db="http://www.mulesoft.org/schema/mule/db" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:apikit-soap="http://www.mulesoft.org/schema/mule/apikit-soap" xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd http://www.mulesoft.org/schema/mule/apikit-soap http://www.mulesoft.org/schema/mule/apikit-soap/current/mule-apikit-soap.xsd http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd">
+    <http:listener-config name="api-httpListenerConfig">
+        <http:listener-connection host="0.0.0.0" port="8081"/>
+    </http:listener-config>
+    <apikit-soap:config httpStatusVarName="httpStatus" name="soapkit-config" port="EmployeeDetailsSOAP" service="EmployeeDetails" wsdlLocation="EmployeeDetails.wsdl"/>
+    <db:config name="Database_Config" doc:name="Database Config" doc:id="914d4516-7bce-49f7-ba42-1264d923b81b" >
+		<db:my-sql-connection host="localhost" port="3306" user="root" database="details" />
+	</db:config>
+	<flow name="api-main">
+        <http:listener config-ref="api-httpListenerConfig" path="/EmployeeDetails/EmployeeDetailsSOAP">
+            <http:response statusCode="#[attributes.additionalTransportData.statusCode default 200]">
+                <http:body>#[payload]</http:body>
+                <http:headers>#[attributes.protocolHeaders default {}]</http:headers>
+            </http:response>
+            <http:error-response statusCode="#[attributes.additionalTransportData.statusCode default 500]">
+                <http:body>#[payload]</http:body>
+                <http:headers>#[attributes.protocolHeaders default {}]</http:headers>
+            </http:error-response>
+        </http:listener>
+        <apikit-soap:router config-ref="soapkit-config">
+            <apikit-soap:message>#[payload]</apikit-soap:message>
+            <apikit-soap:attributes>#[
+              %dw 2.0
+              output application/java
+              ---
+              {
+                  headers: attributes.headers,
+                  method: attributes.method,
+                  queryString: attributes.queryString
+            }]</apikit-soap:attributes>
+        </apikit-soap:router>
+    </flow>
+    <flow name="GetEmployee:\soapkit-config">
+        <set-variable value="#[XmlModule::xpath('//*:EmpID/text()', payload.body.^raw, {})]" doc:name="Set Variable" doc:id="1a1b1c67-0ea9-482f-b452-2bfb9046eaa7" variableName="EmpId"/>
+		<logger level="INFO" doc:name="Logger" doc:id="7d470e91-4946-4020-8f30-024fc9a38ecc" message="#[vars.EmpId]"/>
+		<choice doc:name="Choice" doc:id="3fc61df6-072e-4d80-a85c-dabc942a2793" >
+			<when expression="#[vars.EmpId[0] as Number &lt;=3]">
+				<db:select doc:name="Select" doc:id="205f1189-550a-4e13-b21f-c8502b6eb0d6" config-ref="Database_Config" target="db">
+			<db:sql><![CDATA[SELECT * FROM company WHERE EmpId =:id]]></db:sql>
+			<db:input-parameters><![CDATA[#[{
+	"id": vars.EmpId[0] as Number
+}]]]></db:input-parameters>
+		</db:select>
+				<ee:transform doc:name="Transform Message" doc:id="08a8f528-401a-4dba-b8c5-4f789e596be9">
+					<ee:message>
+						<ee:set-payload><![CDATA[%dw 2.0
+output application/java
+ns soap http://schemas.xmlsoap.org/soap/envelope
+---
+{
+    body: {
+        soap#getEmployeeReponse: {
+            EmpId: vars.db.EmpId[0],
+            EmployeeName: vars.db.EmployeeName[0],
+            EmployeeDep: vars.db.EmployeeDep[0],
+            Salary: vars.db.Salary[0]
+            }
+    } write "application/xml"
+}]]></ee:set-payload>
+					</ee:message>
+				</ee:transform>
+			</when>
+			<otherwise >
+				<ee:transform doc:name="Transform Message" doc:id="ca1c23c6-2fda-45c7-9cb7-65dc54d45531" >
+					<ee:message >
+						<ee:set-payload ><![CDATA[%dw 2.0
+output application/java
+ns soap http://schemas.xmlsoap.org/soap/envelope
+---
+{
+    body: {
+        soap#getEmployeeReponse: {
+            Details: "Incorrect"
+            }
+    } write "application/xml"
+}]]></ee:set-payload>
+					</ee:message>
+				</ee:transform>
+			</otherwise>
+		</choice>
+    </flow>
+</mule>
